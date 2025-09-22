@@ -1,3 +1,8 @@
+# ...existing code...
+import random
+import string
+from datetime import datetime, timedelta
+from . import email_utils
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from fastapi.responses import RedirectResponse
@@ -82,6 +87,37 @@ def google_callback(request: Request, db: Session = Depends(get_db)):
 	return {"access_token": token, "token_type": "bearer"}
 
 # Migración manual (crear tablas)
+# Migración manual (crear tablas)
 @app.on_event("startup")
 def on_startup():
 	models.Base.metadata.create_all(bind=database.engine)
+
+
+# Endpoint para solicitar recuperación de contraseña
+@app.post("/password-reset/request")
+def password_reset_request(data: schemas.PasswordResetRequest, db: Session = Depends(get_db)):
+	user = db.query(models.User).filter(models.User.email == data.email).first()
+	if not user:
+		raise HTTPException(status_code=404, detail="Usuario no encontrado")
+	code = ''.join(random.choices(string.digits, k=6))
+	expires_at = datetime.utcnow() + timedelta(minutes=15)
+	# Eliminar códigos previos
+	db.query(models.PasswordResetCode).filter(models.PasswordResetCode.user_id == user.id).delete()
+	db.add(models.PasswordResetCode(user_id=user.id, code=code, expires_at=expires_at))
+	db.commit()
+	email_utils.send_reset_email(user.email, code)
+	return {"message": "Código enviado al correo electrónico"}
+
+# Endpoint para confirmar recuperación de contraseña
+@app.post("/password-reset/confirm")
+def password_reset_confirm(data: schemas.PasswordResetConfirm, db: Session = Depends(get_db)):
+	user = db.query(models.User).filter(models.User.email == data.email).first()
+	if not user:
+		raise HTTPException(status_code=404, detail="Usuario no encontrado")
+	reset_code = db.query(models.PasswordResetCode).filter(models.PasswordResetCode.user_id == user.id, models.PasswordResetCode.code == data.code).first()
+	if not reset_code or reset_code.expires_at < datetime.utcnow():
+		raise HTTPException(status_code=400, detail="Código inválido o expirado")
+	user.hashed_password = auth.get_password_hash(data.new_password)
+	db.delete(reset_code)
+	db.commit()
+	return {"message": "Contraseña actualizada correctamente"}
