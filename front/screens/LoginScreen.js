@@ -39,12 +39,12 @@ export default function LoginScreen({ navigation }) {
         Alert.alert("Error", "No se pudo registrar, revise los datos o intente más tarde");
       }
     };
-
+/*
     async function handleGoogleLogin(){
       const response = await api.get("/login/google");
       console.log(response)
     }
-
+*/
   return (
     <ImageBackground source={background} style={styles.background} resizeMode="cover">
       <View style={styles.container}>
