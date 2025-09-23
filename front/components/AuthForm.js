@@ -1,7 +1,8 @@
-import React from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image} from "react-native";
+import React from "react"; 
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from "react-native";
 
 const icon = require("../images/logoarroz.png");
+
 export default function AuthForm({
   title,
   infoText,
@@ -12,24 +13,44 @@ export default function AuthForm({
   setPassword,
   confirmPassword,
   setConfirmPassword,
+  code,
+  setCode,
+  showCodeInput = false,
   showPasswordConfirm = false,
   onSubmit,
 }) {
   return (
     <View style={styles.modal}>
-    <View style={styles.logoContainer}>
+      <View style={styles.logoContainer}>
         <Image source={icon} style={styles.logo} />
-    </View>
+      </View>
+
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.info}>{infoText}</Text>
 
-      <Text style={styles.label}>Correo electrónico</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Ejemplo: usuario@correo.com"
-        value={email}
-        onChangeText={setEmail}
-      />
+      {showCodeInput && (
+        <>
+          <Text style={styles.label}>Código de verificación</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ingresa el código recibido"
+            value={code}
+            onChangeText={setCode}
+          />
+        </>
+      )}
+
+      {email !== undefined && setEmail && (
+        <>
+          <Text style={styles.label}>Correo electrónico</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ejemplo: usuario@correo.com"
+            value={email}
+            onChangeText={setEmail}
+          />
+        </>
+      )}
 
       <Text style={styles.label}>Contraseña</Text>
       <TextInput
@@ -73,12 +94,11 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 5,
   },
-    logoContainer: {
+  logoContainer: {
     width: "100%",
     alignItems: "flex-start",
     marginBottom: 10,
   },
-
   logo: {
     width: 140,
     height: 40,

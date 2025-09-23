@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, ImageBackground, StyleSheet, Alert } from "react-native";
 import AuthForm from "../components/AuthForm";
-import api from "../api/api";
+import api from "../api";
 
 const background = require("../images/fondo.jpg");
 
@@ -51,7 +51,7 @@ export default function RegisterScreen({ navigation }) {
         <View style={{ marginTop: 15, flexDirection: "row" }}>
           <Text>¿Ya tienes cuenta? </Text>
           <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-            <Text style={{ color: "blue", fontWeight: "bold" }}>Inicia sesión</Text>
+            <Text style={{fontWeight: "bold" }}>Inicia sesión</Text>
           </TouchableOpacity>
         </View>
       </View>
