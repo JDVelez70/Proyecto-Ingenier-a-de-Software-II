@@ -1,22 +1,71 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { TensorflowPlugin, useTensorflowModel } from 'react-native-fast-tflite';
+import * as ImageResizer from 'react-native-image-resizer';
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function analyzePhoto(
+  photo: { uri: string; base64?: string },
+  model: TensorflowPlugin
+) {
+  if (!photo.base64) throw new Error("Falta la imagen en base64");
+
+  // 1️⃣ Quitar encabezado 'data:image/...'
+  const base64Data = photo.base64.replace(/^data:image\/\w+;base64,/, '');
+
+  // 2️⃣ Decodificar a bytes
+  const imageBytes = base64ToUint8Array(base64Data);
+
+  // 3️⃣ Aquí DEBERÍAS asegurarte de que la imagen esté redimensionada a 192x192x3
+  // (usa react-native-image-resizer antes de convertirla a base64)
+  const resized = await ImageResizer.default.createResizedImage(photo.uri, 192, 192, 'JPEG', 100);
+
+
+  // 4️⃣ Ejecutar el modelo con el arreglo como TypedArray[]
+  const outputData = await model.model?.run([imageBytes]); // 👈 aquí va el arreglo con los bytes
+
+  console.log('Output:', outputData);
+  return outputData;
+}
+
 
 export default function ScanScreen() {
   const router = useRouter();
+  const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [facing] = useState<'front' | 'back'>('back');
-
+  const model = useTensorflowModel(require('../assets/models/plant_model.tflite'))
   useEffect(() => {
     if (!permission) {
-      requestPermission().catch(() => {
-        /* ignore, user will see prompt */
-      });
+      requestPermission().catch(() => {});
     }
   }, [permission, requestPermission]);
+
+  const handleCapture = async () => {
+    if (!cameraRef.current || !isCameraReady) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: true,
+      });
+      console.log('📸 Foto capturada:', photo.uri);
+      analyzePhoto(photo, model);
+    } catch (error) {
+      console.error('Error al capturar imagen:', error);
+    }
+  };
 
   if (!permission) {
     return (
@@ -32,7 +81,7 @@ export default function ScanScreen() {
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionTitle}>Necesitamos tu permiso</Text>
         <Text style={styles.permissionText}>
-          Autoriza el acceso a la cámara para analizar las hojas y detectar señales tempranas de enfermedades.
+          Autoriza el acceso a la cámara para analizar las hojas.
         </Text>
         <Pressable onPress={requestPermission} style={styles.permissionButton}>
           <Text style={styles.permissionButtonText}>Conceder acceso</Text>
@@ -47,10 +96,12 @@ export default function ScanScreen() {
   return (
     <View style={styles.container}>
       <CameraView
+        ref={cameraRef}
         style={styles.camera}
         facing={facing}
         onCameraReady={() => setIsCameraReady(true)}
       />
+
       <LinearGradient colors={['rgba(1,22,10,0.6)', 'transparent']} style={styles.topOverlay}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
@@ -60,23 +111,16 @@ export default function ScanScreen() {
           <View style={styles.placeholder} />
         </View>
       </LinearGradient>
-      <View style={styles.targetFrame}>
-        <View style={styles.frameOuter}>
-          <View style={[styles.corner, styles.cornerTopLeft]} />
-          <View style={[styles.corner, styles.cornerTopRight]} />
-          <View style={[styles.corner, styles.cornerBottomLeft]} />
-          <View style={[styles.corner, styles.cornerBottomRight]} />
-        </View>
-      </View>
+
       <LinearGradient colors={['transparent', 'rgba(1,22,10,0.85)']} style={styles.bottomOverlay}>
         <View style={styles.bottomContent}>
           <Text style={styles.statusTitle}>
-            {isCameraReady ? 'Centra la hoja dentro del marco' : 'Inicializando la cámara…'}
+            {isCameraReady ? 'Centra la hoja dentro del marco' : 'Inicializando cámara…'}
           </Text>
           <Text style={styles.statusSubtitle}>
-            Mantén la hoja fija y con buena iluminación para obtener mejores resultados.
+            Mantén la hoja fija y con buena iluminación.
           </Text>
-          <Pressable style={({ pressed }) => [styles.captureButton, pressed && styles.capturePressed]}>
+          <Pressable onPress={handleCapture} style={({ pressed }) => [styles.captureButton, pressed && styles.capturePressed]}>
             <LinearGradient
               colors={['#22c55e', '#16a34a']}
               start={{ x: 0, y: 0 }}
