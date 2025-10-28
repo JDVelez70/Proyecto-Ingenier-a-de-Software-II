@@ -4,6 +4,17 @@ import { useTensorflowModel } from 'react-native-fast-tflite';
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera';
 import { createResizePlugin } from 'vision-camera-resize-plugin';
 
+const classMap: Record<number, string> = {
+  0: 'Blanco bacteriano de la hoja',       // Bacterial Leaf Blight
+  1: 'Mancha marrón',                       // Brown Spot
+  2: 'Hoja de arroz sana',                  // Healthy Rice Leaf
+  3: 'Blast de la hoja',                    // Leaf Blast
+  4: 'Escaldado de la hoja',                // Leaf scald
+  5: 'Mancha marrón estrecha',              // Narrow Brown Leaf Spot
+  6: 'Hispa del arroz',                     // Rice Hispa
+  7: 'Rizo de la vaina',                    // Sheath Blight
+};
+
 export default function ScanScreen() {
   const cameraRef = useRef<Camera>(null);
   const { model, isLoading: modelLoading, error: modelError } = useTensorflowModel(
@@ -81,40 +92,31 @@ export default function ScanScreen() {
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
 
-    if (!model) {
-      console.log('Modelo no cargado');
-      return;
-    }
+    if (!model) return;
 
     try {
-      // Redimensionar el frame a 192x192x3
+      // Redimensionar el frame
       const resized = resize(frame, {
         scale: { width: 224, height: 224 },
         pixelFormat: 'rgb',
         dataType: 'float32',
       });
 
-      // Normalizar
-      for (let i = 0; i < resized.length; i++) {
-        resized[i] = resized[i] / 255.0;
-      }
-
-
       // Ejecutar el modelo
-      console.log("rezised frame: ", resized)
-      console.log("model info: ", model.inputs)
       const outputs = model.runSync([resized]);
-      const output = outputs[0]; // tu único output
-      const classes = Object.keys(output);
+      const output = outputs[0];
       const scores = Object.values(output);
 
-      console.log('Classes:', classes);
-      console.log('Scores:', scores);
+      // Determinar la clase más probable
+      const maxIndex = scores.indexOf(Math.max(...scores));
+      const predictedDisease = classMap[maxIndex];
 
+      console.log('Enfermedad más probable:', predictedDisease);
     } catch (error) {
       console.error('Error procesando frame:', error);
     }
   }, [model]);
+
 
   // Estados de carga y permisos
   if (permissionStatus === 'checking') {
