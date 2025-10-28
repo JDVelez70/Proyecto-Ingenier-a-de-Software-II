@@ -1,269 +1,197 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Button, Linking, Text, View } from 'react-native';
+import { useTensorflowModel } from 'react-native-fast-tflite';
+import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera';
+import { createResizePlugin } from 'vision-camera-resize-plugin';
 
 export default function ScanScreen() {
-  const router = useRouter();
-  const [permission, requestPermission] = useCameraPermissions();
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [facing] = useState<'front' | 'back'>('back');
+  const cameraRef = useRef<Camera>(null);
+  const { model, isLoading: modelLoading, error: modelError } = useTensorflowModel(
+    require('@/assets/models/plant_model.tflite')
+  );
+  const device = useCameraDevice('back');
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const [prediction, setPrediction] = useState<string | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied'>('checking');
+
+  const { resize } = createResizePlugin();
 
   useEffect(() => {
-    if (!permission) {
-      requestPermission().catch(() => {
-        /* ignore, user will see prompt */
-      });
-    }
-  }, [permission, requestPermission]);
+    checkCameraPermission();
+  }, []);
 
-  if (!permission) {
+  const checkCameraPermission = async () => {
+    try {
+      console.log('Checking camera permission...');
+
+      // Si ya tiene permiso, activar cámara
+      if (hasPermission) {
+        console.log('Permission already granted');
+        setPermissionStatus('granted');
+        setCameraActive(true);
+        return;
+      }
+
+      // Si no tiene permiso, solicitarlo
+      console.log('Requesting camera permission...');
+      const permission = await requestPermission();
+
+      console.log('Permission result:', permission);
+
+      if (permission === 'granted') {
+        setPermissionStatus('granted');
+        setCameraActive(true);
+      } else {
+        setPermissionStatus('denied');
+        setCameraActive(false);
+        Alert.alert(
+          'Permiso de cámara requerido',
+          'Esta aplicación necesita acceso a la cámara para escanear plantas. Por favor, permite el acceso a la cámara en la configuración de tu dispositivo.',
+          [
+            {
+              text: 'Abrir configuración',
+              onPress: async () => {
+                try {
+                  const supported = await Linking.canOpenURL('app-settings:');
+                  if (supported) {
+                    await Linking.openSettings();
+                  } else {
+                    Alert.alert(
+                      'No se puede abrir configuración',
+                      'Por favor, abre manualmente los permisos desde los ajustes de tu dispositivo.'
+                    );
+                  }
+                } catch (error) {
+                  console.warn('Error al abrir configuración:', error);
+                }
+              },
+            },
+            { text: 'Cancelar', style: 'cancel' },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error checking camera permission:', error);
+      setPermissionStatus('denied');
+      setCameraActive(false);
+    }
+  };
+
+  const frameProcessor = useFrameProcessor((frame) => {
+    'worklet';
+
+    if (!model) {
+      console.log('Modelo no cargado');
+      return;
+    }
+
+    try {
+      // Redimensionar el frame a 192x192x3
+      const resized = resize(frame, {
+        scale: { width: 224, height: 224 },
+        pixelFormat: 'rgb',
+        dataType: 'float32',
+      });
+
+      // Normalizar
+      for (let i = 0; i < resized.length; i++) {
+        resized[i] = resized[i] / 255.0;
+      }
+
+
+      // Ejecutar el modelo
+      console.log("rezised frame: ", resized)
+      console.log("model info: ", model.inputs)
+      const outputs = model.runSync([resized]);
+      const output = outputs[0]; // tu único output
+      const classes = Object.keys(output);
+      const scores = Object.values(output);
+
+      console.log('Classes:', classes);
+      console.log('Scores:', scores);
+
+    } catch (error) {
+      console.error('Error procesando frame:', error);
+    }
+  }, [model]);
+
+  // Estados de carga y permisos
+  if (permissionStatus === 'checking') {
     return (
-      <View style={styles.permissionContainer}>
-        <ActivityIndicator color="#22c55e" size="large" />
-        <Text style={styles.permissionText}>Preparando cámara…</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+        <Text>Verificando permisos de cámara...</Text>
       </View>
     );
   }
 
-  if (!permission.granted) {
+  if (!device) {
     return (
-      <View style={styles.permissionContainer}>
-        <Text style={styles.permissionTitle}>Necesitamos tu permiso</Text>
-        <Text style={styles.permissionText}>
-          Autoriza el acceso a la cámara para analizar las hojas y detectar señales tempranas de enfermedades.
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Dispositivo de cámara no disponible</Text>
+      </View>
+    );
+  }
+
+  if (permissionStatus === 'denied') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ textAlign: 'center', marginBottom: 20 }}>
+          Permiso de cámara denegado. Esta aplicación necesita acceso a la cámara para funcionar.
         </Text>
-        <Pressable onPress={requestPermission} style={styles.permissionButton}>
-          <Text style={styles.permissionButtonText}>Conceder acceso</Text>
-        </Pressable>
-        <Pressable onPress={() => router.back()} style={styles.secondaryLink}>
-          <Text style={styles.secondaryLinkText}>Volver</Text>
-        </Pressable>
+        <Button
+          title="Solicitar Permiso Nuevamente"
+          onPress={checkCameraPermission}
+        />
+        <Text style={{ marginTop: 20, textAlign: 'center', fontSize: 12, color: 'gray' }}>
+          También puedes habilitar manualmente los permisos de cámara en Configuración → Aplicaciones → [Esta app] → Permisos
+        </Text>
+      </View>
+    );
+  }
+
+  if (modelLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+        <Text>Cargando modelo...</Text>
+      </View>
+    );
+  }
+
+  if (modelError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Error cargando modelo: {modelError.message}</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing={facing}
-        onCameraReady={() => setIsCameraReady(true)}
+    <View style={{ flex: 1 }}>
+      <Camera
+        style={{ flex: 1 }}
+        device={device}
+        isActive={cameraActive}
+        ref={cameraRef}
+        frameProcessor={frameProcessor}
+        pixelFormat="rgb"
       />
-      <LinearGradient colors={['rgba(1,22,10,0.6)', 'transparent']} style={styles.topOverlay}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backLabel}>‹</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>Escaneo rápido</Text>
-          <View style={styles.placeholder} />
-        </View>
-      </LinearGradient>
-      <View style={styles.targetFrame}>
-        <View style={styles.frameOuter}>
-          <View style={[styles.corner, styles.cornerTopLeft]} />
-          <View style={[styles.corner, styles.cornerTopRight]} />
-          <View style={[styles.corner, styles.cornerBottomLeft]} />
-          <View style={[styles.corner, styles.cornerBottomRight]} />
-        </View>
+
+      <View style={{ padding: 20 }}>
+        <Button
+          title="Escaneo rápido"
+          onPress={() => {
+            // Aquí puedes agregar lógica para captura rápida
+          }}
+        />
+        {prediction && (
+          <Text style={{ marginTop: 20, textAlign: 'center' }}>
+            Resultado: {prediction}
+          </Text>
+        )}
       </View>
-      <LinearGradient colors={['transparent', 'rgba(1,22,10,0.85)']} style={styles.bottomOverlay}>
-        <View style={styles.bottomContent}>
-          <Text style={styles.statusTitle}>
-            {isCameraReady ? 'Centra la hoja dentro del marco' : 'Inicializando la cámara…'}
-          </Text>
-          <Text style={styles.statusSubtitle}>
-            Mantén la hoja fija y con buena iluminación para obtener mejores resultados.
-          </Text>
-          <Pressable style={({ pressed }) => [styles.captureButton, pressed && styles.capturePressed]}>
-            <LinearGradient
-              colors={['#22c55e', '#16a34a']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.captureGradient}
-            >
-              <Text style={styles.captureLabel}>Capturar muestra</Text>
-            </LinearGradient>
-          </Pressable>
-        </View>
-      </LinearGradient>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  camera: {
-    flex: 1,
-  },
-  topOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingTop: 48,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(187,247,208,0.35)',
-    backgroundColor: 'rgba(1,22,10,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backLabel: {
-    color: '#bbf7d0',
-    fontSize: 24,
-    lineHeight: 24,
-  },
-  headerTitle: {
-    color: '#ecfccb',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  placeholder: {
-    width: 44,
-    height: 44,
-  },
-  targetFrame: {
-    position: 'absolute',
-    top: '30%',
-    left: '10%',
-    right: '10%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  frameOuter: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: 'rgba(34,197,94,0.35)',
-    backgroundColor: 'rgba(12,83,38,0.1)',
-  },
-  corner: {
-    position: 'absolute',
-    width: 24,
-    height: 24,
-    borderColor: '#bbf7d0',
-  },
-  cornerTopLeft: {
-    borderLeftWidth: 4,
-    borderTopWidth: 4,
-    top: -2,
-    left: -2,
-  },
-  cornerTopRight: {
-    borderRightWidth: 4,
-    borderTopWidth: 4,
-    top: -2,
-    right: -2,
-  },
-  cornerBottomLeft: {
-    borderLeftWidth: 4,
-    borderBottomWidth: 4,
-    bottom: -2,
-    left: -2,
-  },
-  cornerBottomRight: {
-    borderRightWidth: 4,
-    borderBottomWidth: 4,
-    bottom: -2,
-    right: -2,
-  },
-  bottomOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 48,
-  },
-  bottomContent: {
-    gap: 12,
-  },
-  statusTitle: {
-    color: '#bbf7d0',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  statusSubtitle: {
-    color: 'rgba(226,252,239,0.78)',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  captureButton: {
-    marginTop: 12,
-    borderRadius: 28,
-    overflow: 'hidden',
-  },
-  captureGradient: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureLabel: {
-    color: '#022c22',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-  },
-  capturePressed: {
-    opacity: 0.85,
-  },
-  permissionContainer: {
-    flex: 1,
-    backgroundColor: '#01160a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    gap: 16,
-  },
-  permissionTitle: {
-    color: '#bbf7d0',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  permissionText: {
-    color: 'rgba(226,252,239,0.78)',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  permissionButton: {
-    marginTop: 12,
-    borderRadius: 22,
-    backgroundColor: 'rgba(34,197,94,0.6)',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  permissionButtonText: {
-    color: '#022c22',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  secondaryLink: {
-    marginTop: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  secondaryLinkText: {
-    color: 'rgba(134,239,172,0.9)',
-    fontWeight: '600',
-  },
-});
