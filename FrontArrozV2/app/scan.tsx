@@ -1,7 +1,10 @@
+import { LabelCamera } from '@/components/LabelCamera';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Button, Linking, Text, View } from 'react-native';
 import { useTensorflowModel } from 'react-native-fast-tflite';
+import { useSharedValue } from 'react-native-reanimated';
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera';
+import { Worklets } from 'react-native-worklets-core';
 import { createResizePlugin } from 'vision-camera-resize-plugin';
 
 const classMap: Record<number, string> = {
@@ -24,9 +27,14 @@ export default function ScanScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const [prediction, setPrediction] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
-  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied'>('checking');
+  const [permissionStatus, setPermissionStatus] = useState<string>('checking');
+  const currentLabel = useSharedValue('');
 
   const { resize } = createResizePlugin();
+
+  useEffect(()=>{
+    console.log('prediction updated:', prediction);
+  }, [prediction]);
 
   useEffect(() => {
     checkCameraPermission();
@@ -89,31 +97,37 @@ export default function ScanScreen() {
     }
   };
 
+    const updatePrediction = Worklets.createRunOnJS((pred: string) => {
+    try {
+      currentLabel.value = pred;
+    } catch (e) {
+      console.error('updatePrediction error:', e);
+    }
+  });
+
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
 
     if (!model) return;
 
     try {
-      // Redimensionar el frame
       const resized = resize(frame, {
         scale: { width: 224, height: 224 },
         pixelFormat: 'rgb',
         dataType: 'float32',
       });
-
-      // Ejecutar el modelo
       const outputs = model.runSync([resized]);
       const output = outputs[0];
-      const scores = Object.values(output);
-
-      // Determinar la clase más probable
-      const maxIndex = scores.indexOf(Math.max(...scores));
+      const scores = Object.values(output) as number[];
+      const maxScore = Math.max(...scores);
+      if (maxScore < 0.5) return;
+      console.log('max score:', maxScore)
+      const maxIndex = scores.indexOf(maxScore);
       const predictedDisease = classMap[maxIndex];
-
-      console.log('Enfermedad más probable:', predictedDisease);
+      updatePrediction(predictedDisease);
     } catch (error) {
-      console.error('Error procesando frame:', error);
+      // Este catch es dentro del worklet; lo dejamos para evitar crashes silenciosos
+      // pero no hagas console.log complejo aquí.
     }
   }, [model]);
 
@@ -180,19 +194,11 @@ export default function ScanScreen() {
         frameProcessor={frameProcessor}
         pixelFormat="rgb"
       />
-
+      <LabelCamera text={currentLabel} />
       <View style={{ padding: 20 }}>
-        <Button
-          title="Escaneo rápido"
-          onPress={() => {
-            // Aquí puedes agregar lógica para captura rápida
-          }}
-        />
-        {prediction && (
-          <Text style={{ marginTop: 20, textAlign: 'center' }}>
-            Resultado: {prediction}
-          </Text>
-        )}
+        <Text style={{ marginTop: 20, textAlign: 'center' }}>
+          Resultado: {prediction}
+        </Text>
       </View>
     </View>
   );
