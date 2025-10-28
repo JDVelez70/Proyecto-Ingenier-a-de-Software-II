@@ -72,6 +72,3 @@ if __name__ == "__main__":
     else:
         print(f"{H5_PATH} no existe. Entrenando modelo...")
         train_model()
-
-    # Convertir a tflite
-    
