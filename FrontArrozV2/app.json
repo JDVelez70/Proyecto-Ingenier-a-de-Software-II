@@ -44,11 +44,11 @@
         "react-native-vision-camera",
         {
           "cameraPermissionText": "$(PRODUCT_NAME) needs access to your Camera.",
-
           "enableMicrophonePermission": true,
           "microphonePermissionText": "$(PRODUCT_NAME) needs access to your Microphone."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -56,6 +56,7 @@
     },
     "extra": {
       "router": {},
+      "apiUrl": "http://127.0.0.1:8000",
       "eas": {
         "projectId": "313b240d-90d3-4472-9839-e7fae6d2af07"
       }
