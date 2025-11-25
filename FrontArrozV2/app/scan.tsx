@@ -1,6 +1,7 @@
+import { savePhotoState } from '@/client';
 import { LabelCamera } from '@/components/LabelCamera';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Button, Linking, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Button, Image, Linking, StyleSheet, Text, View } from 'react-native';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useSharedValue } from 'react-native-reanimated';
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera';
@@ -8,15 +9,17 @@ import { Worklets } from 'react-native-worklets-core';
 import { createResizePlugin } from 'vision-camera-resize-plugin';
 
 const classMap: Record<number, string> = {
-  0: 'Blanco bacteriano de la hoja',       // Bacterial Leaf Blight
-  1: 'Mancha marrón',                       // Brown Spot
-  2: 'Hoja de arroz sana',                  // Healthy Rice Leaf
-  3: 'Blast de la hoja',                    // Leaf Blast
-  4: 'Escaldado de la hoja',                // Leaf scald
-  5: 'Mancha marrón estrecha',              // Narrow Brown Leaf Spot
-  6: 'Hispa del arroz',                     // Rice Hispa
-  7: 'Rizo de la vaina',                    // Sheath Blight
+  0: 'Blanco bacteriano de la hoja',
+  1: 'Mancha marrón',
+  2: 'Hoja de arroz sana',
+  3: 'Blast de la hoja',
+  4: 'Escaldado de la hoja',
+  5: 'Mancha marrón estrecha',
+  6: 'Hispa del arroz',
+  7: 'Rizo de la vaina',
 };
+
+
 
 export default function ScanScreen() {
   const cameraRef = useRef<Camera>(null);
@@ -25,16 +28,16 @@ export default function ScanScreen() {
   );
   const device = useCameraDevice('back');
   const { hasPermission, requestPermission } = useCameraPermission();
-  const [prediction, setPrediction] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('checking');
+  const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [capturedPrediction, setCapturedPrediction] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  
   const currentLabel = useSharedValue('');
+  const lastPredictionRef = useRef<string>('');
 
   const { resize } = createResizePlugin();
-
-  useEffect(()=>{
-    console.log('prediction updated:', prediction);
-  }, [prediction]);
 
   useEffect(() => {
     checkCameraPermission();
@@ -44,7 +47,6 @@ export default function ScanScreen() {
     try {
       console.log('Checking camera permission...');
 
-      // Si ya tiene permiso, activar cámara
       if (hasPermission) {
         console.log('Permission already granted');
         setPermissionStatus('granted');
@@ -52,7 +54,6 @@ export default function ScanScreen() {
         return;
       }
 
-      // Si no tiene permiso, solicitarlo
       console.log('Requesting camera permission...');
       const permission = await requestPermission();
 
@@ -97,9 +98,10 @@ export default function ScanScreen() {
     }
   };
 
-    const updatePrediction = Worklets.createRunOnJS((pred: string) => {
+  const updatePrediction = Worklets.createRunOnJS((pred: string) => {
     try {
       currentLabel.value = pred;
+      lastPredictionRef.current = pred; // Guardar la última predicción
     } catch (e) {
       console.error('updatePrediction error:', e);
     }
@@ -121,16 +123,58 @@ export default function ScanScreen() {
       const scores = Object.values(output) as number[];
       const maxScore = Math.max(...scores);
       if (maxScore < 0.5) return;
-      console.log('max score:', maxScore)
+      console.log('max score:', maxScore);
       const maxIndex = scores.indexOf(maxScore);
       const predictedDisease = classMap[maxIndex];
       updatePrediction(predictedDisease);
     } catch (error) {
-      // Este catch es dentro del worklet; lo dejamos para evitar crashes silenciosos
-      // pero no hagas console.log complejo aquí.
+      console.error('Frame processor error:', error);
     }
   }, [model]);
 
+ const capturePhotoAndPrediction = async () => {
+  if (!cameraRef.current) {
+    Alert.alert('Error', 'Camera not available');
+    return;
+  }
+
+  try {
+    setIsCapturing(true);
+
+    // Captura
+    const photo = await cameraRef.current.takePhoto({
+      flash: "off",
+    });
+
+    const prediction = lastPredictionRef.current || "unknown";
+
+    console.log("Foto capturada:", photo.path);
+    console.log("Predicción:", prediction);
+
+    // Guarda en backend
+    await savePhotoState(photo.path, prediction === "healthy" ? "sana" : "enferma", prediction);
+
+    setCapturedPhoto(photo.path);
+    setCapturedPrediction(prediction);
+
+    Alert.alert(
+      "Done",
+      `Disease detected: ${prediction}\n\nPhoto uploaded successfully.`,
+      [{ text: "OK" }]
+    );
+
+  } catch (error) {
+    console.error("Error capturing photo:", error);
+    Alert.alert("Error", "Photo capture failed");
+  } finally {
+    setIsCapturing(false);
+  }
+};
+
+  const clearCapture = () => {
+    setCapturedPhoto(null);
+    setCapturedPrediction(null);
+  };
 
   // Estados de carga y permisos
   if (permissionStatus === 'checking') {
@@ -193,13 +237,69 @@ export default function ScanScreen() {
         ref={cameraRef}
         frameProcessor={frameProcessor}
         pixelFormat="rgb"
+        photo={true}
       />
       <LabelCamera text={currentLabel} />
-      <View style={{ padding: 20 }}>
-        <Text style={{ marginTop: 20, textAlign: 'center' }}>
-          Resultado: {prediction}
-        </Text>
+      
+      <View style={styles.controlsContainer}>
+        <Button
+          title={isCapturing ? "Capturando..." : "Capturar Foto y Predicción"}
+          onPress={capturePhotoAndPrediction}
+          disabled={isCapturing}
+          color="#007AFF"
+        />
+        
+        {capturedPhoto && (
+          <View style={styles.captureResult}>
+            <Text style={styles.resultTitle}>Última Captura:</Text>
+            <Text style={styles.predictionText}>
+              Predicción: {capturedPrediction || 'No disponible'}
+            </Text>
+            <Image 
+              source={{ uri: `file://${capturedPhoto}` }} 
+              style={styles.capturedImage}
+              resizeMode="cover"
+            />
+            <Button
+              title="Limpiar Captura"
+              onPress={clearCapture}
+              color="#FF3B30"
+            />
+          </View>
+        )}
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  controlsContainer: {
+    padding: 20,
+    backgroundColor: 'white',
+  },
+  captureResult: {
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  resultTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  predictionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 10,
+    color: '#333',
+  },
+  capturedImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+});
