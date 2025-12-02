@@ -128,7 +128,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 26,
     shadowOffset: { width: 0, height: 18 },
-    elevation: 10,
   },
   cardGradient: {
     flex: 1,

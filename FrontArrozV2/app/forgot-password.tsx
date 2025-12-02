@@ -4,10 +4,37 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AuthLayout } from '@/components/auth/auth-layout';
+import { ApiError, requestPasswordReset } from '@/lib/api';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const handleSendCode = async () => {
+    if (!email) {
+      setError('Ingresa el correo asociado a tu cuenta.');
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const { message } = await requestPasswordReset({ email });
+      setSuccess(message);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+        setSuccess(null);
+        return;
+      }
+      setError('No pudimos enviar el código de recuperación.');
+      setSuccess(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <AuthLayout
@@ -30,19 +57,30 @@ export default function ForgotPasswordScreen() {
           placeholder="nombre@dominio.com"
           placeholderTextColor="rgba(187,247,208,0.55)"
           style={styles.input}
+          editable={!loading}
         />
       </View>
       <Text style={styles.helperText}>
         Dentro de los próximos minutos recibirás tu código de confirmación. Revisa también tu carpeta de spam.
       </Text>
-      <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}>
+      {error && <Text style={styles.errorText}>{error}</Text>}
+      {success && <Text style={styles.successText}>{success}</Text>}
+      <Pressable
+        onPress={handleSendCode}
+        disabled={loading}
+        style={({ pressed }) => [
+          styles.primaryButton,
+          pressed && styles.primaryPressed,
+          loading && styles.primaryDisabled,
+        ]}
+      >
         <LinearGradient
           colors={['#bbf7d0', '#22c55e']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.primaryGradient}
         >
-          <Text style={styles.primaryText}>Enviar código</Text>
+          <Text style={styles.primaryText}>{loading ? 'Enviando...' : 'Enviar código'}</Text>
         </LinearGradient>
       </Pressable>
     </AuthLayout>
@@ -96,8 +134,21 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
     opacity: 0.85,
   },
+  primaryDisabled: {
+    opacity: 0.65,
+  },
   footerLink: {
     color: 'rgba(163,230,53,0.9)',
     fontWeight: '600',
+  },
+  errorText: {
+    color: '#fda4af',
+    fontSize: 13,
+    marginTop: 8,
+  },
+  successText: {
+    color: '#bbf7d0',
+    fontSize: 13,
+    marginTop: 8,
   },
 });

@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AuthLayout } from '@/components/auth/auth-layout';
+import { ApiError, signUp } from '@/lib/api';
+import { saveToken } from '@/lib/session';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -12,9 +14,33 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleRegister = () => {
-    router.replace('/(tabs)');
+  const handleRegister = async () => {
+    if (!email || !password) {
+      setError('Ingresa correo y contraseña.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const { access_token } = await signUp({ email, password });
+      await saveToken(access_token);
+      router.replace('/(tabs)');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+        return;
+      }
+      setError('No pudimos completar el registro.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -47,6 +73,7 @@ export default function RegisterScreen() {
           placeholder="Carolina Ríos"
           placeholderTextColor="rgba(187,247,208,0.55)"
           style={styles.input}
+          editable={!loading}
         />
       </View>
       <View style={styles.fieldBlock}>
@@ -60,6 +87,7 @@ export default function RegisterScreen() {
           placeholder="nombre@dominio.com"
           placeholderTextColor="rgba(187,247,208,0.55)"
           style={styles.input}
+          editable={!loading}
         />
       </View>
       <View style={styles.fieldBlock}>
@@ -71,6 +99,7 @@ export default function RegisterScreen() {
           placeholderTextColor="rgba(187,247,208,0.55)"
           secureTextEntry
           style={styles.input}
+          editable={!loading}
         />
       </View>
       <View style={styles.fieldBlock}>
@@ -82,16 +111,26 @@ export default function RegisterScreen() {
           placeholderTextColor="rgba(187,247,208,0.55)"
           secureTextEntry
           style={styles.input}
+          editable={!loading}
         />
       </View>
-      <Pressable onPress={handleRegister} style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}>
+      {error && <Text style={styles.errorText}>{error}</Text>}
+      <Pressable
+        onPress={handleRegister}
+        disabled={loading}
+        style={({ pressed }) => [
+          styles.primaryButton,
+          pressed && styles.primaryPressed,
+          loading && styles.primaryDisabled,
+        ]}
+      >
         <LinearGradient
           colors={['#4ade80', '#22c55e']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.primaryGradient}
         >
-          <Text style={styles.primaryText}>Crear cuenta</Text>
+          <Text style={styles.primaryText}>{loading ? 'Creando...' : 'Crear cuenta'}</Text>
         </LinearGradient>
       </Pressable>
     </AuthLayout>
@@ -185,5 +224,13 @@ const styles = StyleSheet.create({
   primaryPressed: {
     transform: [{ scale: 0.98 }],
     opacity: 0.85,
+  },
+  primaryDisabled: {
+    opacity: 0.6,
+  },
+  errorText: {
+    color: '#fda4af',
+    fontSize: 13,
+    marginTop: 6,
   },
 });
